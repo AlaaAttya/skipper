@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/zalando/skipper/filters"
+	"github.com/zalando/skipper/secrets/secrettest"
 )
 
 const (
@@ -19,6 +20,12 @@ const (
 )
 
 func makeTestingFilter(claims []string) (*tokenOidcFilter, error) {
+	r := secrettest.NewRegistry()
+	encrypter, err := r.NewEncrypter("key")
+	if err != nil {
+		return nil, err
+	}
+
 	f := &tokenOidcFilter{
 		typ:    checkOIDCAnyClaims,
 		claims: claims,
@@ -26,12 +33,8 @@ func makeTestingFilter(claims []string) (*tokenOidcFilter, error) {
 			ClientID: "test",
 			Endpoint: google.Endpoint,
 		},
-		encrypter: &encrypter{
-			sSource: &testingSecretSource{secretKey: "key"},
-			closer:  make(chan struct{}),
-		},
+		encrypter: encrypter,
 	}
-	err := f.encrypter.refreshCiphers()
 	return f, err
 }
 
@@ -39,7 +42,7 @@ func TestEncryptDecryptState(t *testing.T) {
 	f, err := makeTestingFilter([]string{})
 	assert.NoError(t, err, "could not refresh ciphers")
 
-	nonce, err := f.encrypter.createNonce()
+	nonce, err := f.encrypter.CreateNonce()
 	if err != nil {
 		t.Errorf("Failed to create nonce: %v", err)
 	}
@@ -47,7 +50,7 @@ func TestEncryptDecryptState(t *testing.T) {
 	// enc
 	state, err := createState(nonce, testRedirectUrl)
 	assert.NoError(t, err, "failed to create state")
-	stateEnc, err := f.encrypter.encryptDataBlock(state)
+	stateEnc, err := f.encrypter.Encrypt(state)
 	if err != nil {
 		t.Errorf("Failed to encrypt data block: %v", err)
 	}
@@ -58,7 +61,7 @@ func TestEncryptDecryptState(t *testing.T) {
 	if _, err := fmt.Sscanf(stateEncHex, "%x", &stateQueryEnc); err != nil && err != io.EOF {
 		t.Errorf("Failed to read hex string: %v", err)
 	}
-	stateQueryPlain, err := f.encrypter.decryptDataBlock(stateQueryEnc)
+	stateQueryPlain, err := f.encrypter.Decrypt(stateQueryEnc)
 	if err != nil {
 		t.Errorf("token from state query is invalid: %v", err)
 	}
